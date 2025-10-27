@@ -9,9 +9,10 @@ import copy as cp
 
 class Network:
     # ---------------- INSTANTIATION ------------------
-    def __init__(self, model, toReport):
+    def __init__(self, model, toReport, evidence):
         self.model = model # model imported from file
         self.toReport = toReport
+        self.evidence = evidence
         self.probs = {} # dictionary of dictionaries for absolute probabilities
         self.vars = [] # array of all variables in model
         self.varsStates = {} # dictionary providing all states names for each variable
@@ -26,6 +27,14 @@ class Network:
         # to that in self.varParents. 
         self.parentsStates = {} # redundant with varsStates, but stores ordered states for all parents of each variable
         self.parentsNumStates = {} # redundant with varsNumStates, but stores number of states for all parents of each variable
+
+        self.varsWithEvidence = [] # list of all variables with evidence
+        self.evidenceDict = {} # dictionary of evidence variables and associated confirmed states
+        self.isEvidenceDict = {} # dictionary containing True/False values for whether evidence was provided
+
+        for piece in self.evidence:
+            self.varsWithEvidence.append(piece[0])
+            self.evidenceDict.update({piece[0] : piece[1]})
         
         # for each state for each variable
         for var in model.nodes(): # for every variable in tree
@@ -58,6 +67,11 @@ class Network:
 
             self.parentsStates.update({var: parStatesDict})
             self.parentsNumStates.update({var: parNumStatesDict})
+            self.isEvidenceDict.update({var: False})
+
+        for var in self.varsWithEvidence:
+            self.isEvidenceDict[var] = True
+        
         
 
         # Instatiation data
@@ -141,6 +155,8 @@ class Network:
 
         localDistribution = np.zeros(self.varsNumStates[report], dtype=float)
 
+        
+
         stateNumber = 0
         for state in self.varsStates[report]:            
             # print("state: " + str(state))
@@ -158,6 +174,15 @@ class Network:
     def computeStateProbability(self, var, state, stateNumber): # CURRENTLY: returns probability of state on variable with the assumption that 
         # all parents are solved for, ignoring evidence
         # WILL: not ignore evidence
+
+        if (self.isEvidenceDict[var]): # if probability is evidence, return a certainty
+            if (state == self.evidenceDict[var]):
+                probability = 1.00
+                return probability
+            else:
+                probability = 0.00
+                return probability
+        
         parentsNumsStates = np.zeros(self.varNumParents[var], dtype=int) # number of possible states for each parent
         currentParStateNums = np.zeros(self.varNumParents[var], dtype=int) # current indexes of states for each parent
         numProbsToSum = 1

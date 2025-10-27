@@ -8,12 +8,14 @@ import copy as cp
 from Network import Network
 from pgmpy.readwrite import BIFReader
 
-def fileImport(NETWORK_NAME, toReport): # imports file as pgmpy.models.BayesianNetwork.BayesianNetwork datatype type
+def fileImport(NETWORK_NAME, toReport, EVIDENCE): # imports file as pgmpy.models.BayesianNetwork.BayesianNetwork datatype type
     
     reader = BIFReader(NETWORK_NAME) # https://pgmpy.org/readwrite/bif.html
-    model = reader.get_model() 
+    model = reader.get_model()
+
+    evidence = getEvidence(EVIDENCE)
     
-    newNetwork = Network(model, toReport)
+    newNetwork = Network(model, toReport, evidence)
         
     return newNetwork
 
@@ -21,6 +23,16 @@ def getVarsToReport(REPORT):
     toReport = REPORT.split(' ; ')
     
     return toReport
+
+def getEvidence(EVIDENCE):
+    evidenceList = EVIDENCE.split('; ')
+    evidence = []
+    for part in evidenceList:
+        evidence.append(part.split(' = '))
+    if EVIDENCE == '':
+        evidence = []
+    print(evidence)
+    return evidence
 
 def getReports(toReport, network):
     
@@ -63,7 +75,7 @@ def saveOutput(GROUP_ID, ALGORITHM, NETWORK_NAME, EVIDENCE_LEVEL, toReport, netw
 def main(GROUP_ID, ALGORITHM, NETWORK_NAME, REPORT, EVIDENCE_LEVEL, EVIDENCE): 
 
     toReport = getVarsToReport(REPORT)
-    network = fileImport(NETWORK_NAME, toReport)
+    network = fileImport(NETWORK_NAME, toReport, EVIDENCE)
     
     if (ALGORITHM == 've'):
         # code to run variable elimination
