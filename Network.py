@@ -122,17 +122,99 @@ class Network:
     # ************************** VARIABLE ELIMINATION METHODS *******************************
 
     # ------------------------ DO VARIABLE ELIMINATION ---------------------------------
-
     def doVariableElim(self):
 
-        for var in self.toReport:
+        for report in self.toReport:
             # Solve the variable with VE
-            print("Variable = " + str(var))
-            print("Found Probabilities: " + str(self.getVarProbs(var)))
+            self.variableElim(report)
+            print("Variable = " + str(report))
+            print("Found Probabilities: " + str(self.getVarProbs(report)))
         
         return
-    
     # ------------------------ END DO VARIABLE ELIMINATION ---------------------------------
+    
+    # ------------------------ VARIABLE ELIMINATION ---------------------------------
+    def variableElim(self, report): # returns probability distribution of variable selected
+        
+        for parent in self.varParents[report]: # start at top of tree, work back down to variable in question
+            self.variableElim(parent)
+
+        localDistribution = np.zeros(self.varsNumStates[report], dtype=float)
+
+        stateNumber = 0
+        for state in self.varsStates[report]:            
+            # print("state: " + str(state))
+            self.probs[report][state] = self.computeStateProbability(report, state, stateNumber)
+            stateNumber += 1
+
+        # print(self.probs[report])
+            
+        return
+
+        
+    # ------------------------ END VARIABLE ELIMINATION ---------------------------------
+
+    # ------------------------ COMPUTE STATE PROBABILITY ---------------------------------
+    def computeStateProbability(self, var, state, stateNumber): # CURRENTLY: returns probability of state on variable with the assumption that 
+        # all parents are solved for, ignoring evidence
+        # WILL: not ignore evidence
+        parentsNumsStates = np.zeros(self.varNumParents[var], dtype=int) # number of possible states for each parent
+        currentParStateNums = np.zeros(self.varNumParents[var], dtype=int) # current indexes of states for each parent
+        numProbsToSum = 1
+        parentIndex = 1
+        for parent in self.varParents[var]:
+            parentsNumsStates[self.varNumParents[var] - parentIndex] = self.varsNumStates[parent] # order of parent's states must be reversed to match 
+            # indexing of pgmpy's cdp
+            numProbsToSum = self.varsNumStates[parent] * numProbsToSum
+            parentIndex += 1
+            
+        probsToSum = np.zeros(numProbsToSum, dtype=float)
+
+        overflow = 0
+        #print()
+        # print("Var: " + var)
+        # print("parents: " + str(self.varParents[var]))
+        for parentsComboIndex in range(numProbsToSum):
+            thisProbability = 1
+            theseParentStatesProbability = 1
+            
+            for parentIndexI in range(self.varNumParents[var]): # get each parent state corresponding to the current index
+                currentParStateNums[parentIndexI] += overflow
+                if(currentParStateNums[parentIndexI] == parentsNumsStates[parentIndexI]):
+                    currentParStateNums[parentIndexI] = 0
+                    overflow = 1
+                else:
+                    overflow = 0
+                    
+            overflow = 1
+                
+            parentIndexI = 0
+            #print(parentsComboIndex)
+            for parent in reversed(self.varParents[var]): # multiply the probability of each parent state at the current state index
+                #print("var: " + str(var))
+                #print("parent: " + str(parent))
+                #print("currentParStateNums: " + str(currentParStateNums))
+                #print("IndexI: " + str(parentIndexI))
+                #print("currentParStateNums[parentIndexI]: " + str(currentParStateNums[parentIndexI]))
+                parentStateName = self.varsStates[parent][currentParStateNums[parentIndexI]] # get state name of current parent state's index
+                # print(parentStateName)
+                # print(self.probs[parent][parentStateName])
+                theseParentStatesProbability = theseParentStatesProbability * self.probs[parent][parentStateName]
+                parentIndexI += 1 # -= 1
+                
+            # print("State Probabilities: ")
+            # print(self.varCDPsVals[var][stateNumber][parentsComboIndex])
+
+            #print("state prob given parent combo: " + str(self.varCDPsVals[var][stateNumber][parentsComboIndex]))
+            
+            thisProbability = self.varCDPsVals[var][stateNumber][parentsComboIndex] * theseParentStatesProbability
+            probsToSum[parentsComboIndex] = thisProbability # probability given this set of parents
+
+        probability = 0
+        for i in range(numProbsToSum):
+            probability += probsToSum[i]
+        return probability
+    # ------------------------ END COMPUTE STATE PROBABILITY ---------------------------------   
     
 
 
