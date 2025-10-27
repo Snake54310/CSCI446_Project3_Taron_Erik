@@ -8,12 +8,12 @@ import copy as cp
 from Network import Network
 from pgmpy.readwrite import BIFReader
 
-def fileImport(NETWORK_NAME): # imports file as pgmpy.models.BayesianNetwork.BayesianNetwork datatype type
+def fileImport(NETWORK_NAME, toReport): # imports file as pgmpy.models.BayesianNetwork.BayesianNetwork datatype type
     
     reader = BIFReader(NETWORK_NAME) # https://pgmpy.org/readwrite/bif.html
     model = reader.get_model() 
     
-    newNetwork = Network(model)
+    newNetwork = Network(model, toReport)
         
     return newNetwork
 
@@ -61,17 +61,22 @@ def saveOutput(GROUP_ID, ALGORITHM, NETWORK_NAME, EVIDENCE_LEVEL, toReport, netw
     return
 
 def main(GROUP_ID, ALGORITHM, NETWORK_NAME, REPORT, EVIDENCE_LEVEL, EVIDENCE): 
-    network = fileImport(NETWORK_NAME)
 
     toReport = getVarsToReport(REPORT)
+    network = fileImport(NETWORK_NAME, toReport)
+    
     if (ALGORITHM == 've'):
         # code to run variable elimination
         # will be method on Network class
         print("run VE")
+        network.doVariableElim()
+        
     elif (ALGORITHM == 'gibbs'):
         # code to run gibbs sampling
         # will be method on Network class
         print("run gibbs")
+        network.doGibbsSample()
+        
     else:
         print("Not a valid algorithm. Terminating...")
         sys.exit() # exit program
