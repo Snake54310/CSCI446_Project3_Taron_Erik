@@ -42,7 +42,6 @@ def getReports(toReport, network):
         reportString = reportString[:-2]
         reportString += ")"
         reportString += "\n"
-        print(reportString)
         
     return reportString
         

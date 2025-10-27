@@ -17,22 +17,14 @@ class Network:
             varcdp = model.get_cpds(var) # get given cdps
             varStates = varcdp.state_names[var] # to get possible states
             varProbDict = {} # initialize absolute probability dictionary
-            newVarStates = []
+            varStates = []
             for state in varStates: # for all possible states
                 varProbDict.update({state : -1}) # initialize as unknown, only update once
-                newVarStates.append(state)
+                self.varStates.append(state)
                 
             self.probs.update({var : varProbDict})
             self.vars.append(var)
-            self.varsStates.update({var : newVarStates})
-
-        print("vars:")
-        print(self.vars)
-        print("probs:")
-        print(self.probs)
-        print("varsStates:")
-        print(self.varsStates)
-
+            self.varsStates.update({var : varStates})
             
     def getVars(self):
         return self.vars # return list of all variables in network
