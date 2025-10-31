@@ -26,9 +26,10 @@ def getVarsToReport(REPORT):
 
 def getEvidence(EVIDENCE):
     evidenceList = EVIDENCE.split('; ')
+    # print("Evidence List: " + evidenceList)
     evidence = []
     for part in evidenceList:
-        evidence.append(part.split(' = '))
+        evidence.append(part.split('='))
     if EVIDENCE == '':
         evidence = []
     print(evidence)

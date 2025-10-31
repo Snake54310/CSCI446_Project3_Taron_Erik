@@ -15,6 +15,13 @@ class Network:
         self.evidence = evidence
         self.probs = {} # dictionary of dictionaries for absolute probabilities
         self.eprobs = {} # dictionary of dictionaries for absolute probabilities based upon children
+        self.tprobs = {} # dictionary of true probabilities
+
+        self.probsSolved = {} # tracks whether state probabilities have been solved for
+        self.eprobsSolved = {} # tracks whether state probabilities have been solved for
+        self.tprobsSolved = {} # tracks whether state probabilities have been solved for
+
+        
         self.vars = [] # array of all variables in model
         self.varsStates = {} # dictionary providing all states names for each variable
         self.varsNumStates = {} # records the number of states for each variable
@@ -44,6 +51,8 @@ class Network:
 
         for piece in self.evidence:
             self.varsWithEvidence.append(piece[0])
+            print("evidenceVar: " + str(piece[0]))
+            print("evidenceState: " + str(piece[1]))
             self.evidenceDict.update({piece[0] : piece[1]})
         
         # for each state for each variable
@@ -52,14 +61,22 @@ class Network:
             varStates = varcdp.state_names[var] # to get possible states
             varProbDict = {} # initialize absolute probability dictionary
             varEProbDict = {} # initialize absolute probability dictionary
+            varTProbDict = {} # initialize absolute probability dictionary
             newVarStates = []
             for state in varStates: # for all possible states
                 varProbDict.update({state : -1}) # initialize as unknown, only update once
                 varEProbDict.update({state : -1}) # initialize as unknown, only update once
+                varTProbDict.update({state : -1}) # initialize as unknown, only update once
                 newVarStates.append(state)
                 
             self.probs.update({var : varProbDict})
             self.eprobs.update({var : varEProbDict})
+            self.tprobs.update({var : varTProbDict})
+
+            self.probsSolved.update({var: False})
+            self.eprobsSolved.update({var: False})
+            self.tprobsSolved.update({var: False})
+                
             self.vars.append(var)
             self.varsStates.update({var : newVarStates})
             self.varsNumStates.update({var : len(newVarStates)})
@@ -72,6 +89,8 @@ class Network:
             
             self.varCDPs.update({var: varcdp})
             self.varCDPsVals.update({var : varcdp.get_values()})
+
+            self.probsStateDistributions.update({var: {}})
 
         for var in model.nodes(): # for every variable in tree (again, but separate due to previous datastructure dependencies)
             parStatesDict = {}
@@ -176,21 +195,46 @@ class Network:
     def variableElim(self, report): # returns probability distribution of variable selected
         
         for parent in self.varParents[report]: # start at top of tree, work back down to variable in question
-            if (self.probs[parent] != -1): # if parent probability has not been solved for
+            if (not self.probsSolved[parent]): # if parent probability has not been solved for
                 self.variableElim(parent)
 
         localDistribution = np.zeros(self.varsNumStates[report], dtype=float)
 
         
-
-        stateNumber = 0
-        for state in self.varsStates[report]:            
-            # print("state: " + str(state))
-            self.probs[report][state] = self.computeStateProbabilityFromParents(report, state, stateNumber)
-            stateNumber += 1
+        if (not self.probsSolved[report]): # if we have not solved for this forward probability
+            stateNumber = 0
+            for state in self.varsStates[report]: # get forward probability (based purely on parent evidence)           
+                # print("state: " + str(state))
+                self.probs[report][state] = self.computeStateProbabilityFromParents(report, state, stateNumber)
+                stateNumber += 1
+            self.probsSolved[report] = True
 
         # print(self.probs[report])
-            
+
+        for child in self.varChildren[report]: # following all parents, solve down for children. Then, solve backwards
+            if (not self.eprobsSolved[child]): # if child backwards probability has not been found
+                self.variableElim(child)
+
+        if (not self.eprobsSolved[report]): # if we have not solved for this backward probability
+            stateNumber = 0 
+            for state in self.varsStates[report]: # get backwards probability (extracted from child evidence, based on that parent evidence)           
+                # print("state: " + str(state))
+                self.eprobs[report][state] = self.computeStateProbabilityFromChildren(report, state, stateNumber)
+                stateNumber += 1
+            self.eprobsSolved[report] = True
+
+
+        for parent in self.varParents[report]: # start at top of tree, work back down to variable in question
+            if (not self.tprobsSolved[parent]): # if parent probability has not been solved for
+                self.variableElim(parent)
+        
+        stateNumber = 0 
+        for state in self.varsStates[report]: # get backwards probability (extracted from child evidence, based on that parent evidence)           
+            # print("state: " + str(state))
+            self.tprobs[report][state] = self.computeTrueState(report, state, stateNumber)
+            stateNumber += 1
+        self.tprobsSolved[report] = True
+        
         return
 
         
@@ -249,7 +293,7 @@ class Network:
         for i in range(numProbsToSum):
             uniformProbsToSum[i] = (probsToSum[i]/probability)
         
-        self.probsStateDistributions.update({var: {state: probsToSum}})
+        self.probsStateDistributions[var].update({state: probsToSum})
         self.numProbsStateDistributions.update({var: len(probsToSum)})
 
         if (self.isEvidenceDict[var]): # if probability is evidence, return a certainty
@@ -306,7 +350,7 @@ class Network:
             childNumParents = self.varNumParents[child]
             
             childParentIndex = 0 # get parent number of variable as it relates to child
-            while (var != self.varParents[childParentIndex]):
+            while (var != self.varParents[child][childParentIndex]):
                 childParentIndex += 1
 
             parentsNumStates = np.zeros(childNumParents, dtype=int)
@@ -323,6 +367,8 @@ class Network:
                 probDistProbsOfStates = np.zeros(childNumStates, dtype=float) # should fill with identical values
                 for stateIndex in range(childNumStates): # for every possible state of child
                     childStateName = self.varsStates[child][stateIndex] # retrieve string name associated with this state on child
+                    #print("child state name: " + childStateName)
+                    #print("Prob dist given Child: " + str(childrenStatesDistributions[childIndex]))
                     probDistgivenState = childrenStatesDistributions[childIndex][childStateName][StateDistIndex] # probability of this distribution
                     # on this child, given this state
                     probStateGivenDist = self.varCDPsVals[child][stateIndex][StateDistIndex] # probability of child state given this distribution
@@ -331,19 +377,19 @@ class Network:
                     # P(A n B) = P(A|B)*P(B), || B is probability this child has our state, A is probability child is member of our distribution
                     probDistAndState = probDistgivenState * self.eprobs[child][childStateName] # probability that child has this state and it is
                     # associated with this distribution
-                    # P(A n B) = P(B|A)*P(A)
-                    # => P(A) = P(A n B) / P(B|A) || A is probability child is member of our distribution, B is probability this child has our state
                     probDist = 0
                     if (probStateGivenDist == 0):
                         numDistProbsToWeight -= 1
-                    else:    
-                        probDist = probDistAndState / probStateGivenDist # probability that this child is associated with this distribution
+                    else:
+                        # P(A n B) = P(B|A)*P(A)
+                        # => P(A) = P(A n B) / P(B|A) || A is probability child is member of our distribution, B is probability this child has our state
+                        probDist = probDistAndState # / probStateGivenDist # probability that this child is associated with this distribution
                         # technically speaking, because this result is no longer associated with the state 
                         # of the child, every loop should return the same value. 
                     probDistProbsOfStates[stateIndex] = probDist
                     totalStateProbDistProb += probDist
 
-                probDist = totalStateProbDistProb / numDistProbsToWeight # take an average to protect accuracy
+                probDist = totalStateProbDistProb #/ numDistProbsToWeight # take an average to protect accuracy
                 probsOfEachDist[StateDistIndex] = probDist
 
                 # check if StateDistIndex is associated with truthfulness of the state we're checking on var
@@ -377,6 +423,69 @@ class Network:
         
         probability =  totalProb # self.probs[var][state] 
         # WILL NEED TO BE NORMALIZED ACROSS ALL STATES IN LATER CODE, OUTSIDE THIS METHOD!!!
+        return probability
+
+    def computeTrueState(self, var, state, stateNumber): # Gets true probability using top-down recursion, from eprobs
+        
+        parentsNumsStates = np.zeros(self.varNumParents[var], dtype=int) # number of possible states for each parent
+        currentParStateNums = np.zeros(self.varNumParents[var], dtype=int) # current indexes of states for each parent
+        numProbsToSum = 1
+        parentIndex = 1
+        for parent in self.varParents[var]:
+            parentsNumsStates[self.varNumParents[var] - parentIndex] = self.varsNumStates[parent] # order of parent's states must be reversed to match 
+            # indexing of pgmpy's cdp
+            numProbsToSum = self.varsNumStates[parent] * numProbsToSum
+            parentIndex += 1
+            
+        probsToSum = np.zeros(numProbsToSum, dtype=float)
+
+        overflow = 0
+        #print()
+        # print("Var: " + var)
+        # print("parents: " + str(self.varParents[var]))
+        for parentsComboIndex in range(numProbsToSum):
+            thisProbability = 1
+            theseParentStatesProbability = 1
+            
+            for parentIndexI in range(self.varNumParents[var]): # get each parent state corresponding to the current index
+                currentParStateNums[parentIndexI] += overflow
+                if(currentParStateNums[parentIndexI] == parentsNumsStates[parentIndexI]):
+                    currentParStateNums[parentIndexI] = 0
+                    overflow = 1
+                else:
+                    overflow = 0
+                    
+            overflow = 1
+                
+            parentIndexI = 0
+            #print(parentsComboIndex)
+            for parent in reversed(self.varParents[var]): # multiply the probability of each parent state at the current state index
+                parentStateName = self.varsStates[parent][currentParStateNums[parentIndexI]] # get state name of current parent state's index
+                theseParentStatesProbability = theseParentStatesProbability * self.tprobs[parent][parentStateName]
+                parentIndexI += 1 # -= 1
+            
+            thisProbability = self.varCDPsVals[var][stateNumber][parentsComboIndex] * theseParentStatesProbability
+            probsToSum[parentsComboIndex] = thisProbability # probability given this set of parents
+
+        probability = 0
+        for i in range(numProbsToSum):
+            probability += probsToSum[i]
+
+        uniformProbsToSum = np.zeros(numProbsToSum, dtype=float)
+        for i in range(numProbsToSum):
+            uniformProbsToSum[i] = (probsToSum[i]/probability)
+        
+        # self.probsStateDistributions.update({var: {state: probsToSum}})
+        # self.numProbsStateDistributions.update({var: len(probsToSum)})
+
+        if (self.isEvidenceDict[var]): # if probability is evidence, return a certainty
+            if (state == self.evidenceDict[var]):
+                probability = 1.00
+                return probability
+            else:
+                probability = 0.00
+                return probability
+        
         return probability
     # ------------------------ END COMPUTE STATE PROBABILITY ---------------------------------   
     
