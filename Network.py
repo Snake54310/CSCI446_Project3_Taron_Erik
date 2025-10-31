@@ -200,14 +200,6 @@ class Network:
     def computeStateProbabilityFromParents(self, var, state, stateNumber): # CURRENTLY: returns probability of state on variable with the assumption that 
         # all parents are solved for
         # used to update self.Eprobs
-
-        if (self.isEvidenceDict[var]): # if probability is evidence, return a certainty
-            if (state == self.evidenceDict[var]):
-                probability = 1.00
-                return probability
-            else:
-                probability = 0.00
-                return probability
         
         parentsNumsStates = np.zeros(self.varNumParents[var], dtype=int) # number of possible states for each parent
         currentParStateNums = np.zeros(self.varNumParents[var], dtype=int) # current indexes of states for each parent
@@ -259,6 +251,14 @@ class Network:
         
         self.probsStateDistributions.update({var: {state: probsToSum}})
         self.numProbsStateDistributions.update({var: len(probsToSum)})
+
+        if (self.isEvidenceDict[var]): # if probability is evidence, return a certainty
+            if (state == self.evidenceDict[var]):
+                probability = 1.00
+                return probability
+            else:
+                probability = 0.00
+                return probability
         
         return probability
 
@@ -278,51 +278,105 @@ class Network:
             return probability
 
         childrenNumsStateDistributions = np.zeros(numberOfChildren, dtype=int) # number of possible states for each child
-        currentChildStateNums = np.zeros(numberOfChildren, dtype=int) # current indexes of states for each child
-        childrenStatesDistributions = []
+        # currentChildStateNums = np.zeros(numberOfChildren, dtype=int) # current indexes of states for each child
+        childrenStatesDistributions = [] # array of probabilities of each probability distribution on each child, given the state of the child
 
-        childrenActualProbabilities = []
+        childrenActualProbabilities = [] # array of raw, true propabilities for each state on each child
 
-        numDistsToSum = 0
-        childIndex = 0
+        #numDistsToSum = 0 # total number of disributions counted across all children
+        childIndex = 0 # index of current child being computed on
+
+        
+        probsOfStateOnEachChild = np.zeros(numberOfChildren, dtype=float) # probability of each state child-to-child basis
+        
         
         for child in self.varChildren[var]: # get all children. You need the probability of all distributions for every child given every state.
             childrenNumsStateDistributions[childIndex] = self.numProbsStateDistributions[child] 
             # order of children's states must be reversed to match 
             # indexing of pgmpy's cdp
-            numDistsToSum += self.numProbsStateDistributions[child]
-            childrenStatesDistributions.append(self.ProbsStateDistributions[child])
+            # numDistsToSum += self.numProbsStateDistributions[child]
+            childrenStatesDistributions.append(self.probsStateDistributions[child])
             childrenActualProbabilities.append(self.eprobs[child])
 
-            childNumStates = self.varsNumsStates[child]
+            childNumStates = self.varsNumStates[child]
+            
+            probsOfEachDist = np.zeros(childrenNumsStateDistributions[childIndex], dtype=float) # probability of every distribution on child
+
+            childParentsNumsStates = self.parentsNumStates[child]
+            childNumParents = self.varNumParents[child]
+            
+            childParentIndex = 0 # get parent number of variable as it relates to child
+            while (var != self.varParents[childParentIndex]):
+                childParentIndex += 1
+
+            parentsNumStates = np.zeros(childNumParents, dtype=int)
+            parentNumStatesInd = 0
+            for parentNumStates in childParentsNumsStates.values():
+                parentsNumStates[parentNumStatesInd] = parentNumStates
+                parentNumStatesInd += 1
 
             for StateDistIndex in range(childrenNumsStateDistributions[childIndex]): # for every state distribution on child 
                 # (associated with number of states on all of child's parents)
+                parentStateAssociations = np.zeros(childNumParents, dtype=int)
+                totalStateProbDistProb = 0
+                numDistProbsToWeight = childNumStates
+                probDistProbsOfStates = np.zeros(childNumStates, dtype=float) # should fill with identical values
                 for stateIndex in range(childNumStates): # for every possible state of child
                     childStateName = self.varsStates[child][stateIndex] # retrieve string name associated with this state on child
                     probDistgivenState = childrenStatesDistributions[childIndex][childStateName][StateDistIndex] # probability of this distribution
                     # on this child, given this state
                     probStateGivenDist = self.varCDPsVals[child][stateIndex][StateDistIndex] # probability of child state given this distribution
-                    likelihoodOnStateInDist = probDistgivenState * probStateGivenDist # probability that if child has this state, it is associated with this
+                    # likelihoodOnStateInDist = probDistgivenState * probStateGivenDist # probability that if child has this state, it is associated with this
                     # distribution
-                    weightedProbability = likelihoodOnStateInDist * self.eprobs[child][childStateName] # probability that child has this state and it is
+                    # P(A n B) = P(A|B)*P(B), || B is probability this child has our state, A is probability child is member of our distribution
+                    probDistAndState = probDistgivenState * self.eprobs[child][childStateName] # probability that child has this state and it is
                     # associated with this distribution
-                    # todo: sum all probabilties associated with our variable's (one of the child's parents states, 
-                    # weighted by the probabilities of our variable's states
-                    # then, use that probability distribution to get the probability of the state we're testing on our variable. 
+                    # P(A n B) = P(B|A)*P(A)
+                    # => P(A) = P(A n B) / P(B|A) || A is probability child is member of our distribution, B is probability this child has our state
+                    probDist = 0
+                    if (probStateGivenDist == 0):
+                        numDistProbsToWeight -= 1
+                    else:    
+                        probDist = probDistAndState / probStateGivenDist # probability that this child is associated with this distribution
+                        # technically speaking, because this result is no longer associated with the state 
+                        # of the child, every loop should return the same value. 
+                    probDistProbsOfStates[stateIndex] = probDist
+                    totalStateProbDistProb += probDist
+
+                probDist = totalStateProbDistProb / numDistProbsToWeight # take an average to protect accuracy
+                probsOfEachDist[StateDistIndex] = probDist
+
+                # check if StateDistIndex is associated with truthfulness of the state we're checking on var
+                counted = 1
+                for parent in range(childNumParents):
+                    counted = counted * parentsNumStates[childNumParents - parent - 1]
+                    parentStateAssociations[childNumParents - parent - 1] = StateDistIndex % counted
+                    
+                childDistVarStateIndex = parentStateAssociations[childParentIndex]
+                    
+                applies = (stateNumber == childDistVarStateIndex)
+
+                if (applies):
+                    probsOfStateOnEachChild[childIndex] += probDist
+                # todo: sum all probabilties associated with our variable's (one of the child's parents states, 
+                # weighted by the probabilities of our variable's states
+                # then, use that probability distribution to get the probability of the state we're testing on our variable.
+                
 
             
             childIndex += 1
 
+
+        '''probability = 0
+        for prob in probsOfStateOnEachChild:
+            probability += prob
+        probability = probability/numberOfChildren'''
+        totalProb = 1
+        for prob in probsOfStateOnEachChild:
+            totalProb = totalProb * prob
         
-
-            
-        probsToSum = np.zeros(numProbsToSum, dtype=float)
-
-
-
-
-
+        probability =  totalProb # self.probs[var][state] 
+        # WILL NEED TO BE NORMALIZED ACROSS ALL STATES IN LATER CODE, OUTSIDE THIS METHOD!!!
         return probability
     # ------------------------ END COMPUTE STATE PROBABILITY ---------------------------------   
     
