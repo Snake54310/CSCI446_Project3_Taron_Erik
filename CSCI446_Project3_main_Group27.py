@@ -32,7 +32,7 @@ def getEvidence(EVIDENCE):
         evidence.append(part.split('='))
     if EVIDENCE == '':
         evidence = []
-    print(evidence)
+    # print(evidence)
     return evidence
 
 def getReports(toReport, network):

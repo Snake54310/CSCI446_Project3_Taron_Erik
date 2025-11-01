@@ -17,8 +17,6 @@ class Network:
         self.eprobs = {} # dictionary of dictionaries for absolute probabilities based upon children
         self.tprobs = {} # dictionary of true probabilities
 
-        self.stateCounts = {} # cxount the number of occurances of each state for gibbs sampling
-
         self.probsSolved = {} # tracks whether state probabilities have been solved for
         self.eprobsSolved = {} # tracks whether state probabilities have been solved for
         self.tprobsSolved = {} # tracks whether state probabilities have been solved for
@@ -76,19 +74,16 @@ class Network:
             varProbDict = {} # initialize absolute probability dictionary
             varEProbDict = {} # initialize absolute probability dictionary
             varTProbDict = {} # initialize absolute probability dictionary
-            varStateCounts = {} # initialize storage for counting states on vars
             newVarStates = []
             for state in varStates: # for all possible states
                 varProbDict.update({state : -1}) # initialize as unknown, only update once
                 varEProbDict.update({state : -1}) # initialize as unknown, only update once
                 varTProbDict.update({state : -1}) # initialize as unknown, only update once
-                varStateCounts.update({state : 0}) # initialize as 0
                 newVarStates.append(state)
                 
             self.probs.update({var : varProbDict})
             self.eprobs.update({var : varEProbDict})
             self.tprobs.update({var : varTProbDict})
-            self.stateCounts.update({var : varStateCounts})
 
             self.probsSolved.update({var: False})
             self.eprobsSolved.update({var: False})
@@ -198,6 +193,7 @@ class Network:
 
     # ------------------------ DO VARIABLE ELIMINATION ---------------------------------
     def doVariableElim(self):
+
         for report in self.toReport:
             # Solve the variable with VE
             self.variableElim(report)
@@ -253,21 +249,16 @@ class Network:
             if (not self.tprobsSolved[parent]): # if parent probability has not been solved for
                 self.variableElim(parent)
         
-        stateNumber = 0
-        for state in self.varsStates[report]:
-            self.tprobs[report][state] = self.computeTrueState(report, state, stateNumber)
-            stateNumber += 1
-
-        
-        tUnnormalizedSum = 0.0
-        for state in self.varsStates[report]:
-            self.tprobs[report][state] *= self.eprobs[report][state]
-            tUnnormalizedSum += self.tprobs[report][state]
-        
-        if tUnnormalizedSum > 0:
-            for state in self.varsStates[report]:
-                self.tprobs[report][state] = self.tprobs[report][state] / tUnnormalizedSum
-        
+        stateNumber = 0 
+        for state in self.varsStates[report]: # get backwards probability (extracted from child evidence, based on that parent evidence)           
+            # print("state: " + str(state))
+            if (self.varNumParents[report] == 0):
+                print(report)
+                print("THIS IS HEAD NODE~EPROB IS: " + str(self.eprobs[report][state]))
+                self.tprobs[report][state] = self.eprobs[report][state] 
+            else:
+                self.tprobs[report][state] = self.computeTrueState(report, state, stateNumber)
+                stateNumber += 1
         self.tprobsSolved[report] = True
         
         return
@@ -341,60 +332,150 @@ class Network:
         
         return probability
 
-    def computeStateProbabilityFromChildren(self, var, state, stateNumber):
-        if self.isEvidenceDict[var]:
-            return 1.0 if state == self.evidenceDict[var] else 0.0
-    
+    def computeStateProbabilityFromChildren(self, var, state, stateNumber): # used to update self.Eprobs, gets parent probabilities from 
+        # previous top-down absolutes and seen children probabilities
+        if (self.isEvidenceDict[var]): # if probability is evidence, return a certainty
+            #print("evidenceState: " + str(self.evidenceDict[var]))
+            #print(self.evidenceDict[var])
+            #print("variableState: " + str(state))
+            #print(state)
+            if (state == self.evidenceDict[var]):
+                probability = 1.00
+                return probability
+            else:
+                probability = 0.00
+                return probability
+                
         numberOfChildren = self.varNumChildren[var]
-        if numberOfChildren == 0:
-            # return self.probs[var][state]
-            return 1
-    
-        probsOfStateOnEachChild = np.zeros(numberOfChildren, dtype=float)
-        childIndex = 0
+        if (numberOfChildren == 0): # if there are no children, then the probability is equal to the calculated absolute probability based upon parents
+            probability = 1
+            return probability
 
-        for child in self.varChildren[var]:
-            childNumDists = self.numProbsStateDistributions[child]
+        childrenNumsStateDistributions = np.zeros(numberOfChildren, dtype=int) # number of possible states for each child
+        # currentChildStateNums = np.zeros(numberOfChildren, dtype=int) # current indexes of states for each child
+        childrenStatesDistributions = [] # array of probabilities of each probability distribution on each child, given the state of the child
+
+        childrenActualProbabilities = [] # array of raw, true propabilities for each state on each child
+
+        #numDistsToSum = 0 # total number of disributions counted across all children
+        childIndex = 0 # index of current child being computed on
+
+        
+        probsOfStateOnEachChild = np.zeros(numberOfChildren, dtype=float) # probability of each state child-to-child basis
+        
+        
+        for child in self.varChildren[var]: # get all children. You need the probability of all distributions for every child given every state.
+            childrenNumsStateDistributions[childIndex] = self.numProbsStateDistributions[child] 
+            # order of children's states must be reversed to match 
+            # indexing of pgmpy's cdp
+            # numDistsToSum += self.numProbsStateDistributions[child]
+            childrenStatesDistributions.append(self.probsStateDistributions[child])
+            childrenActualProbabilities.append(self.eprobs[child])
+
             childNumStates = self.varsNumStates[child]
-            childStates = self.varsStates[child]
-    
-            childProbsOfDists = np.zeros(childNumDists, dtype=float)
-            for parentIndex in range(childNumDists):
-                for stateIndex in range(childNumStates):
-                    stateName = childStates[stateIndex]
-                    # probability of state given distribution times probability of state
-                    childProbsOfDists[parentIndex] += self.varCDPsVals[child][stateIndex][parentIndex] * self.eprobs[child][stateName]
-    
-            # Decode parentIndex back to parent states 
-            childParentsNumbersStates = list(self.parentsNumStates[child].values()) # number of states on each parent on child
+            
+            probsOfEachDist = np.zeros(childrenNumsStateDistributions[childIndex], dtype=float) # probability of every distribution on child
+
+            childParentsNumsStates = self.parentsNumStates[child].values()
+            
             childNumParents = self.varNumParents[child]
-            parentPosition = 0
-            childParentsOrder = self.varParents[child] # order of parents on child
-            while var != childParentsOrder[parentPosition]:
-                parentPosition += 1
-            parentPosition = childNumParents - parentPosition - 1  # Reversed pos
-    
-            parentsStatesNums = np.array(list(reversed(childParentsNumbersStates)), dtype=int)
-    
-            stateProbSum = 0.0
-            for parentIndex in range(childNumDists):
-                remainder = parentIndex
-                parentStates = np.zeros(childNumParents, dtype=int)
-                for parentIndexAssorted in range(childNumParents):
-                    parentStates[parentIndexAssorted] = remainder % parentsStatesNums[parentIndexAssorted]
-                    remainder //= parentsStatesNums[parentIndexAssorted]
-                if parentStates[parentPosition] == stateNumber:
-                    stateProbSum += childProbsOfDists[parentIndex]
-    
-            probsOfStateOnEachChild[childIndex] = stateProbSum
+            
+            childParentIndex = 0 # get parent number of variable as it relates to child
+            childCorrectParentsOrder = self.varParents[child]
+            while (var != childCorrectParentsOrder[childParentIndex]):
+                childParentIndex += 1
+            childParentIndex = childNumParents - childParentIndex - 1
+
+            parentsStatesNums = np.zeros(childNumParents, dtype=int)
+            parentNumStatesInd = 0
+            for parentNumStates in reversed(childParentsNumsStates):
+                parentsStatesNums[parentNumStatesInd] = parentNumStates
+                parentNumStatesInd += 1
+
+            for StateDistIndex in range(childrenNumsStateDistributions[childIndex]): # for every state distribution on child 
+                # (associated with number of states on all of child's parents)
+                parentStateAssociations = np.zeros(childNumParents, dtype=int)
+                totalStateProbDistProb = 0
+                numDistProbsToWeight = childNumStates
+                probDistProbsOfStates = np.zeros(childNumStates, dtype=float) # should fill with identical values
+                for stateIndex in range(childNumStates): # for every possible state of child
+                    childStateName = self.varsStates[child][stateIndex] # retrieve string name associated with this state on child
+                    #print("child state name: " + childStateName)
+                    #print("Prob dist given Child: " + str(childrenStatesDistributions[childIndex]))
+                    probDistgivenState = childrenStatesDistributions[childIndex][childStateName][StateDistIndex] # probability of this distribution
+                    # on this child, given this state
+                    probStateGivenDist = self.varCDPsVals[child][stateIndex][StateDistIndex] # probability of child state given this distribution
+                    # likelihoodOnStateInDist = probDistgivenState * probStateGivenDist # probability that if child has this state, it is associated with this
+                    # distribution
+                    # P(A n B) = P(A|B)*P(B), || B is probability this child has our state, A is probability child is member of our distribution
+                    probState = self.eprobs[child][childStateName] # probability the child has this state
+                    probDistAndState = probDistgivenState * probState # probability that child has this state and it is
+                    # associated with this distribution
+                    probDist = 0
+                    '''
+                    if (probStateGivenDist == 0):
+                        numDistProbsToWeight -= 1
+                    else:'''
+                    # P(A n B) = P(B|A)*P(A)
+                    # => P(A) = P(A n B) / P(B|A) || A is probability child is member of our distribution, B is probability this child has our state
+                    probDist = probDistAndState # / probStateGivenDist # probability that this child is associated with this distribution
+                    # technically speaking, because this result is no longer associated with the state 
+                    # of the child, every loop should return the same value. 
+                    probDistProbsOfStates[stateIndex] = probDist
+                    totalStateProbDistProb += probDist
+
+                probDist = totalStateProbDistProb #/ numDistProbsToWeight # take an average to protect accuracy
+                # print(probDist)
+                probsOfEachDist[StateDistIndex] = probDist
+                #print(probDist)
+
+                # check if StateDistIndex is associated with truthfulness of the state we're checking on var
+                '''
+                counted = 1
+                for parent in range(childNumParents):
+                    counted = counted * parentsStatesNums[parent]
+                    parentStateAssociations[parent] = StateDistIndex % counted'''
+                remainder = StateDistIndex
+                for parentIndex in range(childNumParents):
+                    parentStateAssociations[parentIndex] = remainder % parentsStatesNums[parentIndex]
+                    remainder //= parentsStatesNums[parentIndex]
+                                    
+                childDistVarStateIndex = parentStateAssociations[childParentIndex]
+                
+                # print("Variable/parent: " + var)
+                # print("Child: " + child)
+                # print("ParentsNumsStates: " + str(parentsNumStates))
+                # print("Parent Number: " + str(childDistVarStateIndex))
+                # print("State Number: " + str(stateNumber))
+                
+                applies = (stateNumber == childDistVarStateIndex)
+
+                if (applies):
+                    probsOfStateOnEachChild[childIndex] += probDist
+                # todo: sum all probabilties associated with our variable's (one of the child's parents states, 
+                # weighted by the probabilities of our variable's states
+                # then, use that probability distribution to get the probability of the state we're testing on our variable.
+                
+
+            
             childIndex += 1
-    
-        # Product over children
-        totalLikelihood = 1.0
+
+        totalLikelihood = 1
+        # print("EprobChildren: " + str(probsOfStateOnEachChild))
+        #kiddo = 0
         for prob in probsOfStateOnEachChild:
-            totalLikelihood *= prob
-    
-        return totalLikelihood
+            # print("Child: " + self.varChildren[var][kiddo])
+            # print("Total probability of State due to Child: " + str(prob))
+            totalLikelihood = totalLikelihood * prob
+            #kiddo += 1
+
+        oldProb = self.probs[var][state]
+        
+        probability = totalLikelihood # / (oldProb ** (numberOfChildren)) #  numberOfChildren - 1
+
+        print("Eprob of: " + str(state) + " on " + str(var) + " is " + str(probability))
+        # WILL NEED TO BE NORMALIZED ACROSS ALL STATES IN LATER CODE, OUTSIDE THIS METHOD!!!
+        return probability
 
     def computeTrueState(self, var, state, stateNumber): # Gets true probability using top-down recursion, from eprobs
         
@@ -470,128 +551,14 @@ class Network:
 
     def doGibbsSample(self):
 
-        numberToIgnore = 100
-        numberSamples = 2000
-        self.gibbsSampling(numberSamples, numberToIgnore) # Solve the variable with GS
-        
         for var in self.toReport:
-            # Perform Division across samples on reported variable, save to tprobs
-
-            totalSamplesOnReported = 0
-            for state in self.varsStates[var]:
-                totalSamplesOnReported += self.stateCounts[var][state]
-            
-            for state in self.varsStates[var]:
-                self.stateCounts[var][state] = self.stateCounts[var][state] / totalSamplesOnReported
-            
+            # Solve the variable with GS
             print("Variable = " + str(var))
             print("Found Probabilities: " + str(self.getVarProbs(var)))
         
         return
-
-    def gibbsSampling(self, numberOfSamples, numberToIgnore):
-        for var in self.varsWithEvidence: # initialize evidence
-            for state in self.varsStates[var]:
-                self.probs[var][state] = 0
-                self.eprobs[var][state] = 0
-                self.tprobs[var][state] = 0
-                
-            state = self.evidenceDict[var]
-            self.probs[var][state] = 1
-            self.eprobs[var][state] = 1
-            self.tprobs[var][state] = 1
-
-        for var in self.vars:
-            if (not self.isEvidenceDict[var]):
-                stateInit = random.randint(1, self.varsNumStates[var]) - 1 # generate random starting variables for non-evidence
-                stateInit = self.varsStates[var][stateInit]
-                for state in self.varsStates[var]:
-                    if (state == stateInit):
-                        self.probs[var][state] = 1
-                        self.eprobs[var][state] = 1
-                        self.tprobs[var][state] = 1
-                    else:
-                        self.probs[var][state] = 0
-                        self.eprobs[var][state] = 0
-                        self.tprobs[var][state] = 0
-
-        networkSize = len(self.vars) # number of variables in network
-
-        for i in range(numberOfSamples): # big number, consider scaling to network size
-            varNumberChange = random.randint(1, networkSize) - 1
-            varToChange = self.vars[varNumberChange]
-            
-            if (not self.isEvidenceDict[varToChange]): # if it not evidence, we can update it
-
-                stateNumber = 0
-                for state in self.varsStates[varToChange]:  
-                    self.probs[varToChange][state] = self.computeStateProbabilityFromParents(varToChange, state, stateNumber)
-                    stateNumber += 1
-                    for child in self.varChildren[varToChange]:
-                        if (not child in self.numProbsStateDistributions): 
-                            numChildDists = 1
-                            for parentOfChild in self.varParents[child]:
-                                numChildDists *= self.parentsNumStates[child][parentOfChild]
-                            self.numProbsStateDistributions[child] = numChildDists
-
-                    
-                stateNumber = 0
-                for state in self.varsStates[varToChange]:  
-                    self.eprobs[varToChange][state] = self.computeStateProbabilityFromChildren(varToChange, state, stateNumber)
-                    stateNumber += 1
-
-                tUnnormalizedSum = 0.0
-                for state in self.varsStates[varToChange]:
-                    finalProb = self.eprobs[varToChange][state] * self.probs[varToChange][state]
-                    self.tprobs[varToChange][state] = finalProb
-                    tUnnormalizedSum += finalProb
-
-                for state in self.varsStates[varToChange]:
-                    self.tprobs[varToChange][state] = self.tprobs[varToChange][state] / tUnnormalizedSum
-
-                newState = self.getRandomFromDist(varToChange, self.tprobs[varToChange])
-
-                if (numberToIgnore == 0):
-                    self.stateCounts[varToChange][newState] += 1
-                else: 
-                    numberToIgnore -= 1
-
-                for state in self.varsStates[varToChange]: 
-                    if (state == newState):
-                        self.probs[var][state] = 1
-                        self.eprobs[var][state] = 1
-                        self.tprobs[var][state] = 1
-                    else:
-                        self.probs[var][state] = 0
-                        self.eprobs[var][state] = 0
-                        self.tprobs[var][state] = 0
-                
-                
     
     # ------------------------ END DO GIBBS SAMPLING ---------------------------------
-    def getRandomFromDist(self, var, dist):
-        probNumber = 0
-        numSelections = 10000
-        selections = np.zeros(10000, dtype=int)
-        selectionsPlaced = 0
-        for state in self.varsStates[var]:
-
-            prob = dist[state]
-            numSelections -= 1 # assume int() always rounds down a number, so we need to not index higher than we actually put values.
-            numberSelectionSpaces = int(prob * 10000)
-            for i in range(numberSelectionSpaces):
-                selections[selectionsPlaced] = probNumber
-                selectionsPlaced += 1
-            probNumber += 1
-
-        selectedIndex = random.randint(0, numSelections - 1)
-
-        selectedStateNum = selections[selectedIndex]
-
-        selectedState = self.varsStates[var][selectedStateNum]
-
-        return selectedState
-        
 
 
     # ************************** END GIBBS SAMPLING METHODS *******************************
