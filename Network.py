@@ -17,6 +17,10 @@ class Network:
         self.eprobs = {} # dictionary of dictionaries for absolute probabilities based upon children
         self.tprobs = {} # dictionary of true probabilities
 
+        self.pprobs = {}
+
+        self.eprobsUnnorm = {}
+        
         self.stateCounts = {} # cxount the number of occurances of each state for gibbs sampling
 
         self.probsSolved = {} # tracks whether state probabilities have been solved for
@@ -74,13 +78,17 @@ class Network:
             varcdp = model.get_cpds(var) # get given cdps
             varStates = varcdp.state_names[var] # to get possible states
             varProbDict = {} # initialize absolute probability dictionary
+            varPProbDict = {} # initialize absolute probability dictionary
             varEProbDict = {} # initialize absolute probability dictionary
+            varEProbUnnormDict = {} # initialize absolute probability dictionary
             varTProbDict = {} # initialize absolute probability dictionary
             varStateCounts = {} # initialize storage for counting states on vars
             newVarStates = []
             for state in varStates: # for all possible states
                 varProbDict.update({state : -1}) # initialize as unknown, only update once
+                varPProbDict.update({state : -1}) # initialize as unknown, only update once
                 varEProbDict.update({state : -1}) # initialize as unknown, only update once
+                varEProbUnnormDict.update({state : -1}) # initialize as unknown, only update once
                 varTProbDict.update({state : -1}) # initialize as unknown, only update once
                 varStateCounts.update({state : 0}) # initialize as 0
                 newVarStates.append(state)
@@ -88,6 +96,9 @@ class Network:
             self.probs.update({var : varProbDict})
             self.eprobs.update({var : varEProbDict})
             self.tprobs.update({var : varTProbDict})
+            self.eprobsUnnorm.update({var : varEProbUnnormDict})
+            self.pprobs.update({var : varPProbDict})
+            
             self.stateCounts.update({var : varStateCounts})
 
             self.probsSolved.update({var: False})
@@ -133,33 +144,6 @@ class Network:
         for var in self.varsWithEvidence:
             self.isEvidenceDict[var] = True
         
-        
-
-        # Instatiation data
-        '''
-        print("varNumParents: ")
-        print(self.varNumParents)
-        print("parentsNumStates: ")
-        print(self.parentsNumStates)
-        print("parentsStates: ")
-        print(self.parentsStates)
-        print("varCDPVals: ")
-        print(self.varCDPsVals)   
-        print("varCDPS: ")
-        print(self.varCDPs)
-        print("varChildren: ")
-        print(self.varChildren)
-        print("varsNumStates: ")
-        print(self.varsNumStates)
-        print("varParents: ")
-        print(self.varParents)
-        print("vars:")
-        print(self.vars)
-        print("probs:")
-        print(self.probs)
-        print("varsStates:")
-        print(self.varsStates)
-        '''
 
     # ---------------- END INSTANTIATION ------------------
 
@@ -240,12 +224,12 @@ class Network:
                 eUnnormalizedSum += self.eprobs[report][state]
                 stateNumber += 1
 
-            # print("eprobs: " + str(self.eprobs[report]))
             for state in self.varsStates[report]:
-                # print("eUnnormalizedSum: " + str(eUnnormalizedSum))
-                self.eprobs[report][state] = self.eprobs[report][state] / eUnnormalizedSum
-                #print(self.eprobs[report])
-                
+                if (eUnnormalizedSum > 0):
+                    self.eprobs[report][state] = self.eprobs[report][state] / eUnnormalizedSum
+                else:
+                    self.eprobs[report][state] = 1 / self.varsNumStates[report]
+                    
             self.eprobsSolved[report] = True
 
 
@@ -255,13 +239,15 @@ class Network:
         
         stateNumber = 0
         for state in self.varsStates[report]:
-            self.tprobs[report][state] = self.computeTrueState(report, state, stateNumber)
-            stateNumber += 1
+            if (self.varNumParents[report] == 0):
+                self.tprobs[report][state] = self.eprobs[report][state] * self.probs[report][state]
+            else:
+                self.tprobs[report][state] = self.computeTrueState(report, state, stateNumber)
+                stateNumber += 1
 
         
         tUnnormalizedSum = 0.0
         for state in self.varsStates[report]:
-            self.tprobs[report][state] *= self.eprobs[report][state]
             tUnnormalizedSum += self.tprobs[report][state]
         
         if tUnnormalizedSum > 0:
@@ -335,6 +321,8 @@ class Network:
         self.probsStateDistributions[var].update({state: uniformProbsToSum})
         self.numProbsStateDistributions.update({var: len(probsToSum)})
 
+        self.pprobs[var][state] = probability
+
         if (self.isEvidenceDict[var]): # if probability is evidence, return a certainty
             if (state == self.evidenceDict[var]):
                 probability = 1.00
@@ -345,64 +333,73 @@ class Network:
         
         return probability
 
-    def computeStateProbabilityFromChildren(self, var, state, stateNumber, isGibbs):
-        if self.isEvidenceDict[var]:
-            if state == self.evidenceDict[var]:
-                return 1.00 
-            else:
-                return 0.00 
 
+    def computeStateProbabilityFromChildren(self, var, state, stateNumber):
+        if self.isEvidenceDict[var]:
+            return 1.00 if state == self.evidenceDict[var] else 0.00 
+        
         numberOfChildren = self.varNumChildren[var]
         if numberOfChildren == 0:
-            # return self.probs[var][state]
-            return 1.00
-    
+            return 1.00 
+
         probsOfStateOnEachChild = np.zeros(numberOfChildren, dtype=float)
         childIndex = 0
 
         for child in self.varChildren[var]:
             childNumDists = self.numProbsStateDistributions[child]
-            childNumStates = self.varsNumStates[child]
             childStates = self.varsStates[child]
-    
-            childProbsOfDists = np.zeros(childNumDists, dtype=float)
-            for parentIndex in range(childNumDists):
-                for stateIndex in range(childNumStates):
+            
+            likelihoodOfEvidenceBelowChild = np.zeros(childNumDists, dtype=float)
+            for parentComboIndex in range(childNumDists):
+                for stateIndex in range(self.varsNumStates[child]):
                     stateName = childStates[stateIndex]
-                    # probability of state given distribution times probability of state
-                    childProbsOfDists[parentIndex] += self.varCDPsVals[child][stateIndex][parentIndex] * self.eprobs[child][stateName]
-    
-            # Decode parentIndex back to parent states 
-            childParentsNumbersStates = list(self.parentsNumStates[child].values()) # number of states on each parent on child
+                    likelihoodOfEvidenceBelowChild[parentComboIndex] += \
+                        self.varCDPsVals[child][stateIndex][parentComboIndex] * self.eprobs[child][stateName]
+
+            childParentsOrder = self.varParents[child]
+            childParentsNumbersStates = list(self.parentsNumStates[child].values())
             childNumParents = self.varNumParents[child]
-            parentPosition = 0
-            childParentsOrder = self.varParents[child] # order of parents on child
-            while var != childParentsOrder[parentPosition]:
-                parentPosition += 1
-            parentPosition = childNumParents - parentPosition - 1  # Reversed pos
-    
+
+            parentPosition = childParentsOrder.index(var) 
+            parentPositionReversed = childNumParents - parentPosition - 1 # Position to match CPT indexing
+
             parentsStatesNums = np.array(list(reversed(childParentsNumbersStates)), dtype=int)
-    
-            stateProbSum = 0.0
-            for parentIndex in range(childNumDists):
-                remainder = parentIndex
+            
+            stateProbSum = 0.0 # This is the final lambda_child(var=state)
+            
+
+            for parentComboIndex in range(childNumDists):
+
+                remainder = parentComboIndex
                 parentStates = np.zeros(childNumParents, dtype=int)
-                for parentIndexAssorted in range(childNumParents):
-                    parentStates[parentIndexAssorted] = remainder % parentsStatesNums[parentIndexAssorted]
-                    remainder //= parentsStatesNums[parentIndexAssorted]
-                if parentStates[parentPosition] == stateNumber:
-                    stateProbSum += childProbsOfDists[parentIndex]
-    
+                for i in range(childNumParents):
+                    parentStates[i] = remainder % parentsStatesNums[i]
+                    remainder //= parentsStatesNums[i]
+
+
+                if parentStates[parentPositionReversed] == stateNumber:
+                    
+
+                    coParentPiProduct = 1.0
+                    for i in range(childNumParents):
+                        if i != parentPositionReversed: 
+                            coParentVarName = childParentsOrder[childNumParents - 1 - i] 
+                            coParentStateName = self.varsStates[coParentVarName][parentStates[i]]
+                            
+                            coParentPiProduct *= self.probs[coParentVarName][coParentStateName]
+
+                    stateProbSum += likelihoodOfEvidenceBelowChild[parentComboIndex] * coParentPiProduct
+            
             probsOfStateOnEachChild[childIndex] = stateProbSum
             childIndex += 1
     
-        # Product over children
         totalLikelihood = 1.0
         for prob in probsOfStateOnEachChild:
             totalLikelihood *= prob
     
         return totalLikelihood
 
+        
     def computeTrueState(self, var, state, stateNumber): # Gets true probability using top-down recursion, from eprobs
         
         parentsNumsStates = np.zeros(self.varNumParents[var], dtype=int) # number of possible states for each parent
@@ -459,8 +456,8 @@ class Network:
             for i in range(numProbsToSum):
                 uniformProbsToSum[i] = (1/numProbsToSum)
         
-        # self.probsStateDistributions.update({var: {state: probsToSum}})
-        # self.numProbsStateDistributions.update({var: len(probsToSum)})
+        self.probsStateDistributions[var][state] = probsToSum
+        #self.numProbsStateDistributions.update({var: len(probsToSum)})
 
         if (self.isEvidenceDict[var]): # if probability is evidence, return a certainty
             if (state == self.evidenceDict[var]):
@@ -525,10 +522,12 @@ class Network:
                         self.probs[var][state] = 1
                         self.eprobs[var][state] = 1
                         self.tprobs[var][state] = 1
+                        self.pprobs[var][state] = 1
                     else:
                         self.probs[var][state] = 0
                         self.eprobs[var][state] = 0
                         self.tprobs[var][state] = 0
+                        self.pprobs[var][state] = 0
 
         networkSize = len(self.vars) # number of variables in network
 
@@ -538,22 +537,48 @@ class Network:
             
             if (not self.isEvidenceDict[varToChange]): # if it not evidence, we can update it
 
+                # First, update forward probabilities for varToChange
                 stateNumber = 0
                 for state in self.varsStates[varToChange]:  
                     self.probs[varToChange][state] = self.computeStateProbabilityFromParents(varToChange, state, stateNumber)
                     stateNumber += 1
-                    for child in self.varChildren[varToChange]:
-                        if (not child in self.numProbsStateDistributions): 
-                            numChildDists = 1
-                            for parentOfChild in self.varParents[child]:
-                                numChildDists *= self.parentsNumStates[child][parentOfChild]
-                            self.numProbsStateDistributions[child] = numChildDists
-
-                    
+                
+                # Update forward probabilities for all children
+                for child in self.varChildren[varToChange]:
+                    childStateNumber = 0
+                    for state in self.varsStates[child]:
+                        self.probs[child][state] = self.computeStateProbabilityFromParents(child, state, childStateNumber)
+                        childStateNumber += 1
+                        for grandchild in self.varChildren[child]:
+                            if (not grandchild in self.numProbsStateDistributions): 
+                                numGrandChildDists = 1
+                                for parentOfChild in self.varParents[grandchild]:
+                                    numGrandChildDists *= self.parentsNumStates[grandchild][parentOfChild]
+                                self.numProbsStateDistributions[grandchild] = numGrandChildDists
+                
+                # Now compute lambda messages for all children (from their children)
+                for child in self.varChildren[varToChange]:
+                    childStateNumber = 0
+                    for state in self.varsStates[child]:
+                        self.eprobsUnnorm[child][state] = self.computeStateProbabilityFromChildren(child, state, childStateNumber)
+                        childStateNumber += 1
+                
+                # Finally, compute lambda for varToChange (which now can use children's lambdas)
                 stateNumber = 0
+                eUnnormalizedSum = 0.0
                 for state in self.varsStates[varToChange]:  
-                    self.eprobs[varToChange][state] = self.computeStateProbabilityFromChildren(varToChange, state, stateNumber)
+                    self.eprobsUnnorm[varToChange][state] = self.computeStateProbabilityFromChildren(varToChange, state, stateNumber)
+                    eUnnormalizedSum += self.eprobsUnnorm[varToChange][state]
                     stateNumber += 1
+
+                if eUnnormalizedSum == 0.0:
+                    # Everything collapsed to zero: use uniform distribution
+                    numStates = float(self.varsNumStates[varToChange])
+                    for state in self.varsStates[varToChange]:
+                        self.eprobs[varToChange][state] = 1.0 / numStates
+                else:
+                    for state in self.varsStates[varToChange]:
+                        self.eprobs[varToChange][state] = self.eprobsUnnorm[varToChange][state] / eUnnormalizedSum
 
                 tUnnormalizedSum = 0.0
                 for state in self.varsStates[varToChange]:
@@ -561,8 +586,15 @@ class Network:
                     self.tprobs[varToChange][state] = finalProb
                     tUnnormalizedSum += finalProb
 
-                for state in self.varsStates[varToChange]:
-                    self.tprobs[varToChange][state] = self.tprobs[varToChange][state] / tUnnormalizedSum
+                if tUnnormalizedSum == 0.0:
+                    # Everything collapsed to zero: use uniform distribution
+                    numStates = float(self.varsNumStates[varToChange])
+                    for state in self.varsStates[varToChange]:
+                        self.tprobs[varToChange][state] = 1.0 / numStates
+                else:
+                    # Normalize by sum
+                    for state in self.varsStates[varToChange]:
+                        self.tprobs[varToChange][state] = self.tprobs[varToChange][state] / tUnnormalizedSum
 
                 newState = self.getRandomFromDist(varToChange, self.tprobs[varToChange])
 
@@ -576,11 +608,25 @@ class Network:
                         self.probs[varToChange][state] = 1 # varToChange
                         self.eprobs[varToChange][state] = 1
                         self.tprobs[varToChange][state] = 1
+                        self.pprobs[varToChange][state] = 1
                     else:
                         self.probs[varToChange][state] = 0
                         self.eprobs[varToChange][state] = 0
                         self.tprobs[varToChange][state] = 0
-                
+                        self.pprobs[varToChange][state] = 0
+                        
+                for child in self.varChildren[varToChange]: 
+                    for state in self.varsStates[child]:
+                        if (self.tprobs[child][state] == 0):
+                            self.probs[child][state] = 0 # varToChange
+                            self.eprobs[child][state] = 0
+                            self.tprobs[child][state] = 0
+                            self.pprobs[child][state] = 0
+                        else:
+                            self.probs[child][state] = 1
+                            self.eprobs[child][state] = 1
+                            self.tprobs[child][state] = 1
+                            self.pprobs[child][state] = 1
                 
     
     # ------------------------ END DO GIBBS SAMPLING ---------------------------------
@@ -608,24 +654,6 @@ class Network:
 
 
     # ************************** END GIBBS SAMPLING METHODS *******************************
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
     
     
     
