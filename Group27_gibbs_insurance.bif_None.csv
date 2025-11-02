@@ -1,6 +1,6 @@
 MedCost, Thousand, TenThou, HundredThou, Million
-(0.92, 0.04, 0.02, 0.02)
+(0.92, 0.03, 0.03, 0.02)
 ILiCost, Thousand, TenThou, HundredThou, Million
-(0.97, 0.02, 0.01, 0.01)
+(0.98, 0.01, 0.01, 0.0)
 PropCost, Thousand, TenThou, HundredThou, Million
-(0.48, 0.37, 0.14, 0.01)
+(0.63, 0.33, 0.04, 0.0)

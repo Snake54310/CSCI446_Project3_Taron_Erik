@@ -345,13 +345,13 @@ class Network:
         
         return probability
 
-    def computeStateProbabilityFromChildren(self, var, state, stateNumber):
+    def computeStateProbabilityFromChildren(self, var, state, stateNumber, isGibbs):
         if self.isEvidenceDict[var]:
             if state == self.evidenceDict[var]:
                 return 1.00 
             else:
-                return 0.00
-    
+                return 0.00 
+
         numberOfChildren = self.varNumChildren[var]
         if numberOfChildren == 0:
             # return self.probs[var][state]
@@ -586,20 +586,18 @@ class Network:
     # ------------------------ END DO GIBBS SAMPLING ---------------------------------
     def getRandomFromDist(self, var, dist):
         probNumber = 0
-        numSelections = 1000
         selections = np.zeros(1000, dtype=int)
         selectionsPlaced = 0
         for state in self.varsStates[var]:
 
             prob = dist[state]
-            numSelections -= 1 # assume int() always rounds down a number, so we need to not index higher than we actually put values.
             numberSelectionSpaces = int(prob * 1000)
             for i in range(numberSelectionSpaces):
                 selections[selectionsPlaced] = probNumber
                 selectionsPlaced += 1
             probNumber += 1
 
-        selectedIndex = random.randint(0, numSelections - 1)
+        selectedIndex = random.randint(0, selectionsPlaced - 1)
 
         selectedStateNum = selections[selectedIndex]
 
