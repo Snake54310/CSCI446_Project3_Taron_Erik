@@ -325,8 +325,12 @@ class Network:
             probability += probsToSum[i]
 
         uniformProbsToSum = np.zeros(numProbsToSum, dtype=float)
-        for i in range(numProbsToSum):
-            uniformProbsToSum[i] = (probsToSum[i]/probability)
+        if (probability != 0):     
+            for i in range(numProbsToSum):
+                uniformProbsToSum[i] = (probsToSum[i]/probability)
+        else:
+            for i in range(numProbsToSum):
+                uniformProbsToSum[i] = (1/numProbsToSum)
         #print("Uniform to sum: " + str(uniformProbsToSum))
         self.probsStateDistributions[var].update({state: uniformProbsToSum})
         self.numProbsStateDistributions.update({var: len(probsToSum)})
@@ -343,12 +347,15 @@ class Network:
 
     def computeStateProbabilityFromChildren(self, var, state, stateNumber):
         if self.isEvidenceDict[var]:
-            return 1.0 if state == self.evidenceDict[var] else 0.0
+            if state == self.evidenceDict[var]:
+                return 1.00 
+            else:
+                return 0.00
     
         numberOfChildren = self.varNumChildren[var]
         if numberOfChildren == 0:
             # return self.probs[var][state]
-            return 1
+            return 1.00
     
         probsOfStateOnEachChild = np.zeros(numberOfChildren, dtype=float)
         childIndex = 0
@@ -442,9 +449,15 @@ class Network:
         for i in range(numProbsToSum):
             probability += probsToSum[i]
 
+            
         uniformProbsToSum = np.zeros(numProbsToSum, dtype=float)
-        for i in range(numProbsToSum):
-            uniformProbsToSum[i] = (probsToSum[i]/probability)
+        if (probability != 0):     
+            uniformProbsToSum = np.zeros(numProbsToSum, dtype=float)
+            for i in range(numProbsToSum):
+                uniformProbsToSum[i] = (probsToSum[i]/probability)
+        else:
+            for i in range(numProbsToSum):
+                uniformProbsToSum[i] = (1/numProbsToSum)
         
         # self.probsStateDistributions.update({var: {state: probsToSum}})
         # self.numProbsStateDistributions.update({var: len(probsToSum)})
@@ -469,9 +482,8 @@ class Network:
     # ------------------------ DO GIBBS SAMPLING ---------------------------------
 
     def doGibbsSample(self):
-
-        numberToIgnore = 100
-        numberSamples = 2000
+        numberSamples = 100000
+        numberToIgnore = numberSamples/10
         self.gibbsSampling(numberSamples, numberToIgnore) # Solve the variable with GS
         
         for var in self.toReport:
@@ -483,6 +495,9 @@ class Network:
             
             for state in self.varsStates[var]:
                 self.stateCounts[var][state] = self.stateCounts[var][state] / totalSamplesOnReported
+                self.tprobs[var][state] = self.stateCounts[var][state]
+
+            
             
             print("Variable = " + str(var))
             print("Found Probabilities: " + str(self.getVarProbs(var)))
@@ -558,27 +573,27 @@ class Network:
 
                 for state in self.varsStates[varToChange]: 
                     if (state == newState):
-                        self.probs[var][state] = 1
-                        self.eprobs[var][state] = 1
-                        self.tprobs[var][state] = 1
+                        self.probs[varToChange][state] = 1 # varToChange
+                        self.eprobs[varToChange][state] = 1
+                        self.tprobs[varToChange][state] = 1
                     else:
-                        self.probs[var][state] = 0
-                        self.eprobs[var][state] = 0
-                        self.tprobs[var][state] = 0
+                        self.probs[varToChange][state] = 0
+                        self.eprobs[varToChange][state] = 0
+                        self.tprobs[varToChange][state] = 0
                 
                 
     
     # ------------------------ END DO GIBBS SAMPLING ---------------------------------
     def getRandomFromDist(self, var, dist):
         probNumber = 0
-        numSelections = 10000
-        selections = np.zeros(10000, dtype=int)
+        numSelections = 1000
+        selections = np.zeros(1000, dtype=int)
         selectionsPlaced = 0
         for state in self.varsStates[var]:
 
             prob = dist[state]
             numSelections -= 1 # assume int() always rounds down a number, so we need to not index higher than we actually put values.
-            numberSelectionSpaces = int(prob * 10000)
+            numberSelectionSpaces = int(prob * 1000)
             for i in range(numberSelectionSpaces):
                 selections[selectionsPlaced] = probNumber
                 selectionsPlaced += 1
